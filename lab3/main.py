@@ -1,270 +1,151 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import networkx as nx
-from scipy.spatial.distance import pdist, squareform
-import random
+import matplotlib.pyplot as plt
+import os
+import time
 
-class GraphGenerator:
-    def __init__(self, num_points=100, area_size=100, seed=None):
-        """
-        Инициализация генератора графов
-        
-        Parameters:
-        num_points: количество точек
-        area_size: размер области (area_size x area_size)
-        seed: seed для воспроизводимости
-        """
-        if seed:
-            np.random.seed(seed)
-            random.seed(seed)
-        
-        self.num_points = num_points
-        self.area_size = area_size
-        
-        # Генерация случайных точек
-        self.points = np.random.rand(num_points, 2) * area_size
-        
-        # Матрица расстояний
-        self.distances = squareform(pdist(self.points))
-        
-        # Параметры ограничений
-        self.max_degree = 10  # максимальная степень вершины
-        self.max_distance = 50  # максимальное расстояние для ребра
-        self.min_probability = 0.01  # минимальная вероятность соединения
-        
-        # Инициализация графа
-        self.graph = nx.Graph()
-        self.graph.add_nodes_from(range(num_points))
-        
-        # Степени вершин
-        self.degrees = {i: 0 for i in range(num_points)}
-        
-    def calculate_probabilities_exp(self, node):
-        """Вероятности по формуле P_ij = e^(-a*d_ij)"""
-        a = 0.1  # параметр затухания
-        distances = self.distances[node]
-        
-        # Применяем ограничения
-        probabilities = np.exp(-a * distances)
-        
-        # Учитываем ограничения
-        for j in range(self.num_points):
-            if j == node:  # нет петель
-                probabilities[j] = 0
-            elif distances[j] > self.max_distance:  # ограничение по расстоянию
-                probabilities[j] = 0
-            elif self.degrees[j] >= self.max_degree:  # ограничение по степени
-                probabilities[j] = 0
-                
-        # Нормализация
-        total = np.sum(probabilities)
-        if total > 0:
-            probabilities = probabilities / total
-        else:
-            probabilities = np.zeros_like(probabilities)
-            
-        return probabilities
-    
-    def calculate_probabilities_inv(self, node):
-        """Вероятности по формуле P_ij = 1/d_ij"""
-        distances = self.distances[node]
-        
-        # Избегаем деления на ноль
-        probabilities = np.zeros_like(distances)
-        mask = distances > 0
-        probabilities[mask] = 1.0 / distances[mask]
-        
-        # Учитываем ограничения
-        for j in range(self.num_points):
-            if j == node:  # нет петель
-                probabilities[j] = 0
-            elif distances[j] > self.max_distance:  # ограничение по расстоянию
-                probabilities[j] = 0
-            elif self.degrees[j] >= self.max_degree:  # ограничение по степени
-                probabilities[j] = 0
-                
-        # Нормализация
-        total = np.sum(probabilities)
-        if total > 0:
-            probabilities = probabilities / total
-        else:
-            probabilities = np.zeros_like(probabilities)
-            
-        return probabilities
-    
-    def add_edge_with_probability(self, node, prob_func):
-        """Добавление ребра с заданной вероятностью"""
-        probabilities = prob_func(node)
-        
-        # Проверяем, есть ли доступные вершины
-        if np.sum(probabilities) == 0:
-            return False
-        
-        # Разыгрываем вершину по вероятностям
-        available_nodes = list(range(self.num_points))
-        chosen_node = np.random.choice(available_nodes, p=probabilities)
-        
-        # Добавляем ребро
-        self.graph.add_edge(node, chosen_node)
-        self.degrees[node] += 1
-        self.degrees[chosen_node] += 1
-        
-        return True
-    
-    def generate_graph(self, prob_type='exp', num_edges=None):
-        """
-        Генерация графа
-        
-        Parameters:
-        prob_type: тип вероятности ('exp' или 'inv')
-        num_edges: количество рёбер (если None, то генерируется пока возможно)
-        """
-        if prob_type == 'exp':
-            prob_func = self.calculate_probabilities_exp
-        else:
-            prob_func = self.calculate_probabilities_inv
-        
-        edges_added = 0
-        
-        if num_edges:
-            # Генерация заданного количества рёбер
-            while edges_added < num_edges:
-                # Выбираем случайную вершину
-                node = random.randint(0, self.num_points - 1)
-                
-                # Проверяем, может ли вершина иметь больше рёбер
-                if self.degrees[node] < self.max_degree:
-                    if self.add_edge_with_probability(node, prob_func):
-                        edges_added += 1
-        else:
-            # Генерация пока возможно добавлять рёбра
-            max_attempts = self.num_points * 10
-            attempts = 0
-            
-            while attempts < max_attempts:
-                node = random.randint(0, self.num_points - 1)
-                
-                if self.degrees[node] < self.max_degree:
-                    if self.add_edge_with_probability(node, prob_func):
-                        edges_added += 1
-                        attempts = 0
-                    else:
-                        attempts += 1
-                else:
-                    attempts += 1
-        
-        print(f"Добавлено рёбер: {edges_added}")
-        return self.graph
-    
-    def visualize(self, title="Граф"):
-        """Визуализация графа"""
-        plt.figure(figsize=(12, 8))
-        
-        # Рисуем точки
-        plt.scatter(self.points[:, 0], self.points[:, 1], 
-                   c='lightblue', s=200, edgecolors='black', zorder=2)
-        
-        # Рисуем рёбра
-        for edge in self.graph.edges():
-            i, j = edge
-            plt.plot([self.points[i, 0], self.points[j, 0]],
-                    [self.points[i, 1], self.points[j, 1]],
-                    'gray', alpha=0.5, linewidth=1, zorder=1)
-        
-        # Подписываем вершины
-        for i, (x, y) in enumerate(self.points):
-            plt.annotate(str(i), (x, y), xytext=(5, 5), 
-                        textcoords='offset points', fontsize=8)
-        
-        plt.xlim(-5, self.area_size + 5)
-        plt.ylim(-5, self.area_size + 5)
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        plt.title(title)
-        plt.grid(True, alpha=0.3)
-        plt.gca().set_aspect('equal')
-        plt.show()
-    
-    def analyze_graph(self):
-        """Анализ характеристик графа"""
-        print("\n=== Анализ графа ===")
-        print(f"Количество вершин: {self.graph.number_of_nodes()}")
-        print(f"Количество рёбер: {self.graph.number_of_edges()}")
-        
-        if self.graph.number_of_edges() > 0:
-            # Степени вершин
-            degrees = [d for n, d in self.graph.degree()]
-            print(f"Средняя степень: {np.mean(degrees):.2f}")
-            print(f"Макс степень: {max(degrees)}")
-            print(f"Мин степень: {min(degrees)}")
-            
-            # Компоненты связности
-            components = list(nx.connected_components(self.graph))
-            print(f"Количество компонент связности: {len(components)}")
-            
-            # Размер максимальной компоненты
-            if components:
-                max_component = max(components, key=len)
-                print(f"Размер макс компоненты: {len(max_component)}")
-            
-            # Коэффициент кластеризации
-            clustering = nx.average_clustering(self.graph)
-            print(f"Средний коэффициент кластеризации: {clustering:.3f}")
-        else:
-            print("Граф не содержит рёбер")
+N = 100
+PLANE_SIZE = 100.0
+MIN_DISTANCE = 0.5
+OUTPUT_DIR = "."
 
-# Пример использования
-def run_experiment():
-    """Запуск эксперимента с разными типами вероятностей"""
-    
-    print("=" * 50)
-    print("ГЕНЕРАЦИЯ ГРАФОВ, ПОХОЖИХ НА РЕАЛЬНЫЕ СЕТИ")
-    print("=" * 50)
-    
-    # Создаем генератор
-    generator = GraphGenerator(num_points=100, area_size=100, seed=42)
-    
-    # Генерация графа с вероятностью P_ij = e^(-a*d_ij)
-    print("\n1. ГРАФ С ВЕРОЯТНОСТЬЮ P_ij = e^(-a*d_ij)")
-    graph_exp = generator.generate_graph(prob_type='exp')
-    generator.visualize("Граф с вероятностью P_ij = e^(-a*d_ij)")
-    generator.analyze_graph()
-    
-    # Создаем новый генератор для второго типа вероятности
-    generator2 = GraphGenerator(num_points=100, area_size=100, seed=42)
-    
-    # Генерация графа с вероятностью P_ij = 1/d_ij
-    print("\n2. ГРАФ С ВЕРОЯТНОСТЬЮ P_ij = 1/d_ij")
-    graph_inv = generator2.generate_graph(prob_type='inv')
-    generator2.visualize("Граф с вероятностью P_ij = 1/d_ij")
-    generator2.analyze_graph()
-    
-    # Сравнение распределений степеней
-    plt.figure(figsize=(15, 5))
-    
-    # Экспоненциальная вероятность
-    plt.subplot(1, 2, 1)
-    degrees_exp = [d for n, d in graph_exp.degree()]
-    plt.hist(degrees_exp, bins=range(max(degrees_exp)+2), alpha=0.7, 
-             edgecolor='black', color='skyblue')
-    plt.xlabel('Степень вершины')
-    plt.ylabel('Количество вершин')
-    plt.title('Распределение степеней (экспоненциальная вероятность)')
-    plt.grid(True, alpha=0.3)
-    
-    # Обратная вероятность
-    plt.subplot(1, 2, 2)
-    degrees_inv = [d for n, d in graph_inv.degree()]
-    plt.hist(degrees_inv, bins=range(max(degrees_inv)+2), alpha=0.7, 
-             edgecolor='black', color='lightcoral')
-    plt.xlabel('Степень вершины')
-    plt.ylabel('Количество вершин')
-    plt.title('Распределение степеней (обратная вероятность)')
-    plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.show()
+configs = [
+    {'id':1,  'model':'exp',   'a':0.01,  'b':1.0,  'max_dist':None, 'max_deg':None},
+    {'id':2,  'model':'exp',   'a':0.01,  'b':2.0,  'max_dist':None, 'max_deg':None},
+    {'id':3,  'model':'exp',   'a':0.01,  'b':4.0,  'max_dist':None, 'max_deg':None},
+    {'id':4,  'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':None, 'max_deg':None},
+    {'id':5,  'model':'exp',   'a':0.10,  'b':2.0,  'max_dist':None, 'max_deg':None},
+    {'id':6,  'model':'exp',   'a':0.20,  'b':2.0,  'max_dist':None, 'max_deg':None},
+    {'id':7,  'model':'power', 'a':None,  'b':1.0,  'max_dist':None, 'max_deg':None},
+    {'id':8,  'model':'power', 'a':None,  'b':2.0,  'max_dist':None, 'max_deg':None},
+    {'id':9,  'model':'power', 'a':None,  'b':3.0,  'max_dist':None, 'max_deg':None},
+    {'id':10, 'model':'power', 'a':None,  'b':4.0,  'max_dist':None, 'max_deg':None},
+    {'id':11, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':20,   'max_deg':None},
+    {'id':12, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':10,   'max_deg':None},
+    {'id':13, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':5,    'max_deg':None},
+    {'id':14, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':None, 'max_deg':5},
+    {'id':15, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':None, 'max_deg':3},
+    {'id':16, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':None, 'max_deg':2},
+    {'id':17, 'model':'power', 'a':None,  'b':2.0,  'max_dist':5,    'max_deg':None},
+    {'id':18, 'model':'exp',   'a':0.05,  'b':2.0,  'max_dist':10,   'max_deg':4},
+    {'id':19, 'model':'power', 'a':None,  'b':1.5,  'max_dist':None, 'max_deg':None},
+    {'id':20, 'model':'exp',   'a':0.001, 'b':3.0,  'max_dist':15,   'max_deg':None},
+]
 
-# Запуск эксперимента
-if __name__ == "__main__":
-    run_experiment()
+def get_prob(d, a, b, model):
+    if d < 1e-6:
+        return 0.0
+    if model == 'exp':
+        return np.exp(-a * (d ** b))
+    else:
+        return 1.0 / (d ** b)
+
+def grow_tree(points, dist_matrix, seed=0, a=None, b=None, model='exp',
+              max_dist=None, max_deg=None):
+    G = nx.Graph()
+    G.add_node(seed)
+    connected = {seed}
+
+    MAX_ATTEMPTS = 150000
+    attempt = 0
+
+    while len(connected) < N and attempt < MAX_ATTEMPTS:
+        attempt += 1
+
+        candidates = [i for i in connected if max_deg is None or G.degree(i) < max_deg]
+        if not candidates:
+            break
+
+        i = np.random.choice(candidates)
+
+        possible = []
+        weights = []
+        for j in range(N):
+            if j in connected:
+                continue
+            d = dist_matrix[i, j]
+            if d < MIN_DISTANCE or (max_dist is not None and d > max_dist):
+                continue
+            w = get_prob(d, a, b, model)
+            if w > 0:
+                possible.append(j)
+                weights.append(w)
+
+        if possible:
+            weights = np.array(weights)
+            weights /= weights.sum()
+            j = possible[np.random.choice(len(possible), p=weights)]
+
+            G.add_edge(i, j)
+            connected.add(j)
+
+    return G
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+print("Генерация 20 графов\n")
+
+for cfg in configs:
+    cfg_id = cfg['id']
+    model = cfg['model']
+    a = cfg['a']
+    b = cfg['b']
+    max_d = cfg['max_dist']
+    max_deg = cfg['max_deg']
+
+    points = np.random.uniform(0, PLANE_SIZE, (N, 2))
+    diff = points[:, np.newaxis, :] - points[np.newaxis, :, :]
+    dist_matrix = np.sqrt(np.sum(diff**2, axis=-1))
+
+    print(f"→ Граф #{cfg_id:02d}  ({model}, a={a}, b={b}, maxd={max_d}, maxdeg={max_deg})")
+
+    start = time.time()
+    G = grow_tree(points, dist_matrix, seed=0, a=a, b=b, model=model,
+                  max_dist=max_d, max_deg=max_deg)
+    elapsed = time.time() - start
+
+    conn = len(G)
+    edges = G.number_of_edges()
+    max_deg_real = max(dict(G.degree()).values()) if G else 0
+
+    plt.figure(figsize=(10, 10))
+
+    plt.scatter(points[:, 0], points[:, 1],
+                c='lightgray', s=20, alpha=0.5, label='Все вершины')
+
+    existing = list(G.nodes())
+    if existing:
+        pos = {i: points[i] for i in existing}
+        node_colors = ['red' if i == 0 else 'royalblue' for i in existing]
+        node_sizes  = [120 if i == 0 else 60 for i in existing]
+
+        nx.draw_networkx_nodes(G, pos,
+                               node_color=node_colors,
+                               node_size=node_sizes,
+                               alpha=0.9)
+
+        nx.draw_networkx_edges(G, pos,
+                               edge_color='gray',
+                               width=0.8,
+                               alpha=0.7)
+
+    title = f"#{cfg_id}: {model}"
+    if model == 'exp':
+        title += f" a={a} b={b}"
+    else:
+        title += f" b={b}"
+    if max_d is not None: title += f" maxd={max_d}"
+    if max_deg is not None: title += f" maxdeg={max_deg}"
+    title += f"\nСоединено: {conn}/{N}   Рёбер: {edges}   max deg: {max_deg_real}   {elapsed:.1f}с"
+
+    plt.title(title, fontsize=13)
+    plt.axis('equal')
+    plt.grid(True, alpha=0.25)
+    plt.legend(loc='upper right', fontsize=9)
+
+    fname = f"graph_{cfg_id:02d}.png"
+    plt.savefig(fname, dpi=160, bbox_inches='tight')
+    plt.close()
+
+    print(f"   сохранено → {fname}   (соединено: {conn}, рёбер: {edges})\n")
+
+print("\nГотово.")
